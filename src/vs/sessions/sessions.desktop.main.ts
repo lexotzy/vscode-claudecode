@@ -226,6 +226,10 @@ import './contrib/providers/agentHost/browser/agentHostSessionBranchActions.js';
 import './contrib/providers/agentHost/browser/agentHostSkillButtons.js';
 import './contrib/providers/agentHost/electron-browser/agentHost.contribution.js';
 
+// Claude Code CLI
+import '../platform/claudeCli/electron-browser/claudeCliService.js';
+import './contrib/providers/claudeCli/browser/claudeCli.contribution.js';
+
 // Tunnel Host (allow remote connections to local agent host)
 import './contrib/tunnelHost/electron-browser/tunnelHost.contribution.js';
 
