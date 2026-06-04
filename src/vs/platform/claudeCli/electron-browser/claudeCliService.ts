@@ -10,6 +10,7 @@ import { IConfigurationService } from '../../configuration/common/configuration.
 import { ILogService } from '../../log/common/log.js';
 import { InstantiationType, registerSingleton } from '../../instantiation/common/extensions.js';
 import { IClaudeCliService, IClaudeCliSession, IPermissionRequest } from '../common/claudeCli.js';
+import { escalatingKill } from '../common/processLifecycle.js';
 import { StreamJsonParser } from '../common/streamJsonParser.js';
 import { ClaudeCliStreamEvent } from '../common/streamJson.js';
 
@@ -276,14 +277,14 @@ class ClaudeCliSession extends Disposable implements IClaudeCliSession {
 	cancel(): void {
 		if (this._process && !this._exited) {
 			this._logService.info(`[ClaudeCliSession] cancelling session ${this.sessionId}`);
-			this._process.kill('SIGTERM');
+			escalatingKill(this._process);
 		}
 		this.dispose();
 	}
 
 	override dispose(): void {
 		if (this._process && !this._exited) {
-			this._process.kill('SIGTERM');
+			escalatingKill(this._process);
 		}
 		// Deny pending permissions and shut down the HTTP server.
 		for (const resolver of this._pendingPermissions.values()) {

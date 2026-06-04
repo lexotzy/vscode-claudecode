@@ -5,7 +5,7 @@
 
 import { Emitter, Event } from '../../../../../base/common/event.js';
 import { Codicon } from '../../../../../base/common/codicons.js';
-import { Disposable, DisposableMap } from '../../../../../base/common/lifecycle.js';
+import { Disposable, DisposableMap, DisposableStore } from '../../../../../base/common/lifecycle.js';
 import { Schemas } from '../../../../../base/common/network.js';
 import { ISettableObservable, constObservable, observableValue } from '../../../../../base/common/observable.js';
 import { basename, dirname } from '../../../../../base/common/resources.js';
@@ -168,6 +168,8 @@ export class ClaudeCliSessionsProvider extends Disposable implements ISessionsPr
 	private readonly _newSessions = new DisposableMap<string, ClaudeCliChatModel>();
 	/** Committed sessions. */
 	private readonly _sessions = new Map<string, ClaudeCliChatModel>();
+	/** Per-send listener stores: replaced on each sendRequest so old listeners don't accumulate. */
+	private readonly _sendListeners = this._register(new DisposableMap<string, DisposableStore>());
 
 	constructor(
 		@IClaudeCliService private readonly _claudeCliService: IClaudeCliService,
@@ -286,6 +288,7 @@ export class ClaudeCliSessionsProvider extends Disposable implements ISessionsPr
 		}
 		this._sessions.delete(model.sessionId);
 		this._newSessions.deleteAndDispose(model.sessionId);
+		this._sendListeners.deleteAndDispose(model.sessionId);
 		model.dispose();
 		this._onDidChangeSessions.fire({ added: [], removed: [iSession], changed: [] });
 	}
@@ -355,16 +358,21 @@ export class ClaudeCliSessionsProvider extends Disposable implements ISessionsPr
 		const resumeId = model.isSent ? model.lastCliSessionId : undefined;
 		const cliSession = this._claudeCliService.startSession(workspaceUri, options.query, sessionId, resumeId);
 
-		// Wire up stream events → observable state
-		this._register(cliSession.onDidEmitEvent(event => {
+		// Wire up stream events → observable state.
+		// Use a per-send DisposableStore so that re-sending on the same session
+		// (multi-turn) automatically disposes the previous process's listeners.
+		const listeners = new DisposableStore();
+		this._sendListeners.set(sessionId, listeners);
+
+		listeners.add(cliSession.onDidEmitEvent(event => {
 			this._handleStreamEvent(model, event, iSession);
 		}));
 
-		this._register(cliSession.onPermissionRequest(req => {
+		listeners.add(cliSession.onPermissionRequest(req => {
 			this._handlePermissionRequest(req, cliSession);
 		}));
 
-		this._register(cliSession.onDidExit(code => {
+		listeners.add(cliSession.onDidExit(code => {
 			const now = new Date();
 			if (model.status.get() === SessionStatus.InProgress) {
 				model.setStatus(code === 0 ? SessionStatus.Completed : SessionStatus.Error);
