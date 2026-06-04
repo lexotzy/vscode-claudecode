@@ -15,7 +15,7 @@ import { StreamJsonParser } from '../common/streamJsonParser.js';
 import { ClaudeCliStreamEvent } from '../common/streamJson.js';
 
 // Access Node.js modules via require — electron-browser layer.
-const { spawn, execSync } = require('child_process') as typeof import('child_process');
+const { spawn, execSync, execFile } = require('child_process') as typeof import('child_process');
 
 /** Minimal child-process shape used by ClaudeCliSession. */
 interface IChildProcess {
@@ -360,6 +360,18 @@ export class ClaudeCliService extends Disposable implements IClaudeCliService {
 			existing.cancel();
 			this._sessions.delete(key);
 		}
+	}
+
+	checkAuthStatus(): Promise<'authenticated' | 'unauthenticated'> {
+		if (!this.claudePath) {
+			return Promise.resolve('unauthenticated');
+		}
+		const claudePath = this.claudePath;
+		return new Promise(resolve => {
+			execFile(claudePath, ['auth', 'status'], { timeout: 5000 }, err => {
+				resolve(err ? 'unauthenticated' : 'authenticated');
+			});
+		});
 	}
 
 	override dispose(): void {

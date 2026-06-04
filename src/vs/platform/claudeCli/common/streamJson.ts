@@ -209,3 +209,7 @@ export function isToolUseBlock(b: ClaudeCliContentBlock): b is ClaudeCliToolUseB
 export function isTextBlock(b: ClaudeCliContentBlock): b is ClaudeCliTextBlock {
 	return b.type === 'text';
 }
+
+export function isThinkingBlock(b: ClaudeCliContentBlock): b is ClaudeCliThinkingBlock {
+	return b.type === 'thinking';
+}

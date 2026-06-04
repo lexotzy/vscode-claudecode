@@ -100,4 +100,11 @@ export interface IClaudeCliService {
 	 * Terminate the active session for a workspace and release resources.
 	 */
 	stopSession(workspaceUri: URI): void;
+
+	/**
+	 * Check whether the user is authenticated with Claude Code.
+	 * Runs `claude auth status` and resolves based on exit code.
+	 * Returns `'unauthenticated'` when the binary is unavailable.
+	 */
+	checkAuthStatus(): Promise<'authenticated' | 'unauthenticated'>;
 }
