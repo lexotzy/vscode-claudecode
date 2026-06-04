@@ -18,8 +18,6 @@ import { IsAuxiliaryWindowContext, IsWindowAlwaysOnTopContext, SideBarVisibleCon
 import { IWorkbenchLayoutService, Parts } from '../../workbench/services/layout/browser/layoutService.js';
 import { SessionsWelcomeVisibleContext } from '../common/contextkeys.js';
 import { mainWindow } from '../../base/browser/window.js';
-import { IHostService } from '../../workbench/services/host/browser/host.js';
-import { IWorkspaceContextService } from '../../platform/workspace/common/workspace.js';
 
 // Register Icons
 const panelCloseIcon = registerIcon('agent-panel-close', Codicon.close, localize('agentPanelCloseIcon', "Icon to close the panel."));
@@ -157,8 +155,12 @@ class SwitchToEditorAction extends Action2 {
 	constructor() {
 		super({
 			id: SwitchToEditorAction.ID,
-			title: localize2('switchToEditor', 'Open in Editor'),
+			title: localize2('toggleEditorView', 'Toggle Editor View'),
 			icon: Codicon.code,
+			toggled: {
+				condition: ContextKeyExpr.has('editorPartVisible'),
+				icon: Codicon.layoutSidebarRightOff,
+			},
 			menu: [
 				{
 					id: Menus.TitleBarLeftLayout,
@@ -169,15 +171,13 @@ class SwitchToEditorAction extends Action2 {
 		});
 	}
 
-	async run(accessor: ServicesAccessor): Promise<void> {
-		const hostService = accessor.get(IHostService);
-		const workspaceService = accessor.get(IWorkspaceContextService);
-		const folders = workspaceService.getWorkspace().folders;
-		if (folders.length > 0) {
-			await hostService.openWindow([{ folderUri: folders[0].uri }]);
-		} else {
-			await hostService.openWindow();
-		}
+	run(accessor: ServicesAccessor): void {
+		const layoutService = accessor.get(IWorkbenchLayoutService);
+		const editorVisible = layoutService.isVisible(Parts.EDITOR_PART, mainWindow);
+		// Toggle editor part — when showing editor also hide sessions part for full-screen editor feel,
+		// when hiding editor restore sessions part.
+		layoutService.setPartHidden(editorVisible, Parts.EDITOR_PART);
+		layoutService.setPartHidden(!editorVisible, Parts.SESSIONS_PART);
 	}
 }
 
