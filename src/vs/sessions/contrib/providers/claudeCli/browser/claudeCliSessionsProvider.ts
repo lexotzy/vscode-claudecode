@@ -15,8 +15,11 @@ import { localize } from '../../../../../nls.js';
 import { IDialogService } from '../../../../../platform/dialogs/common/dialogs.js';
 import { ILabelService } from '../../../../../platform/label/common/label.js';
 import { ILogService } from '../../../../../platform/log/common/log.js';
+import { IOpenerService } from '../../../../../platform/opener/common/opener.js';
+import { Registry } from '../../../../../platform/registry/common/platform.js';
+import { Extensions, IOutputChannel, IOutputChannelRegistry, IOutputService } from '../../../../../workbench/services/output/common/output.js';
 import { IClaudeCliService, IPermissionRequest } from '../../../../../platform/claudeCli/common/claudeCli.js';
-import { ClaudeCliStreamEvent, isAssistantEvent, isResultEvent, isSystemInitEvent, isTextBlock, isToolUseBlock } from '../../../../../platform/claudeCli/common/streamJson.js';
+import { ClaudeCliStreamEvent, isAssistantEvent, isResultEvent, isSystemInitEvent, isTextBlock, isThinkingBlock, isToolUseBlock } from '../../../../../platform/claudeCli/common/streamJson.js';
 import {
 	IChat, IChatCheckpoints, ISession, ISessionCapabilities, ISessionChangeset,
 	ISessionFolder, ISessionType, ISessionWorkspace, SessionStatus,
@@ -170,6 +173,8 @@ export class ClaudeCliSessionsProvider extends Disposable implements ISessionsPr
 	private readonly _sessions = new Map<string, ClaudeCliChatModel>();
 	/** Per-send listener stores: replaced on each sendRequest so old listeners don't accumulate. */
 	private readonly _sendListeners = this._register(new DisposableMap<string, DisposableStore>());
+	/** Whether the Claude Code output channel has been registered with the registry. */
+	private _outputChannelRegistered = false;
 
 	constructor(
 		@IClaudeCliService private readonly _claudeCliService: IClaudeCliService,
@@ -177,6 +182,8 @@ export class ClaudeCliSessionsProvider extends Disposable implements ISessionsPr
 		@ILabelService private readonly _labelService: ILabelService,
 		@IGitService private readonly _gitService: IGitService,
 		@IDialogService private readonly _dialogService: IDialogService,
+		@IOpenerService private readonly _openerService: IOpenerService,
+		@IOutputService private readonly _outputService: IOutputService,
 	) {
 		super();
 	}
@@ -335,6 +342,23 @@ export class ClaudeCliSessionsProvider extends Disposable implements ISessionsPr
 			throw new Error('[ClaudeCliProvider] No workspace folder available for session');
 		}
 
+		// Check auth before touching model state — bail early without side effects
+		const authStatus = await this._claudeCliService.checkAuthStatus();
+		if (authStatus === 'unauthenticated') {
+			this._logService.warn('[ClaudeCliProvider] Claude Code not authenticated — prompting login');
+			const loginResult = await this._dialogService.confirm({
+				type: 'warning',
+				title: localize('claudeCli.authRequired', 'Login Required'),
+				message: localize('claudeCli.notLoggedIn', 'You are not logged in to Claude Code.'),
+				detail: localize('claudeCli.loginDetail', 'Click "Log In" to open a browser and sign in, then send your message again.'),
+				primaryButton: localize('claudeCli.logIn', 'Log In'),
+			});
+			if (loginResult.confirmed) {
+				await this._openerService.open(URI.parse('https://claude.ai/login'));
+			}
+			return this._toISession(model);
+		}
+
 		// Set initial state
 		const title = options.query.split('\n')[0].substring(0, 100) || localize('newSession', 'New Session');
 		model.setTitle(title);
@@ -364,8 +388,18 @@ export class ClaudeCliSessionsProvider extends Disposable implements ISessionsPr
 		const listeners = new DisposableStore();
 		this._sendListeners.set(sessionId, listeners);
 
+		// Open the output channel and write a session header.
+		const outputChannel = this._getOutputChannel();
+		if (outputChannel) {
+			const ts = new Date().toLocaleTimeString();
+			outputChannel.append(`\n[${ts}] === ${title} ===\nWorkspace: ${workspaceUri.fsPath}\n`);
+		}
+
 		listeners.add(cliSession.onDidEmitEvent(event => {
 			this._handleStreamEvent(model, event, iSession);
+			if (outputChannel) {
+				this._writeEventToOutput(outputChannel, event);
+			}
 		}));
 
 		listeners.add(cliSession.onPermissionRequest(req => {
@@ -461,6 +495,42 @@ export class ClaudeCliSessionsProvider extends Disposable implements ISessionsPr
 			}
 		}
 		return lines.length > 0 ? lines.join('\n') : toolName;
+	}
+
+	private _getOutputChannel(): IOutputChannel | undefined {
+		const channelId = 'claude-code-output';
+		if (!this._outputChannelRegistered) {
+			Registry.as<IOutputChannelRegistry>(Extensions.OutputChannels)
+				.registerChannel({ id: channelId, label: localize('claudeCli.outputChannel', 'Claude Code'), log: false });
+			this._outputChannelRegistered = true;
+		}
+		return this._outputService.getChannel(channelId);
+	}
+
+	private _writeEventToOutput(channel: IOutputChannel, event: ClaudeCliStreamEvent): void {
+		if (!isAssistantEvent(event) && !isResultEvent(event)) {
+			return;
+		}
+		if (isAssistantEvent(event)) {
+			for (const block of event.message.content) {
+				if (isThinkingBlock(block) && block.thinking.trim()) {
+					channel.append(`\n<think>\n${block.thinking}\n</think>\n`);
+				} else if (isTextBlock(block) && block.text) {
+					channel.append(block.text);
+				} else if (isToolUseBlock(block)) {
+					const args = Object.entries(block.input ?? {})
+						.slice(0, 3)
+						.map(([k, v]) => `${k}: ${String(v).substring(0, 80)}`)
+						.join(', ');
+					channel.append(`\n> ${block.name}(${args})\n`);
+				}
+			}
+		} else if (isResultEvent(event)) {
+			const summary = event.is_error
+				? `\n[Error: ${event.result}]\n`
+				: `\n[Done — ${(event.duration_ms / 1000).toFixed(1)}s, $${event.total_cost_usd.toFixed(4)}]\n`;
+			channel.append(summary);
+		}
 	}
 
 	private _findModel(sessionId: string): ClaudeCliChatModel | undefined {
