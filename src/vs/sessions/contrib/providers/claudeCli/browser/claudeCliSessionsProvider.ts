@@ -351,8 +351,9 @@ export class ClaudeCliSessionsProvider extends Disposable implements ISessionsPr
 			this._onDidChangeSessions.fire({ added: [], removed: [], changed: [iSession] });
 		}
 
-		// Start the CLI process
-		const cliSession = this._claudeCliService.startSession(workspaceUri, options.query, sessionId);
+		// Start the CLI process — resume prior conversation when possible.
+		const resumeId = model.isSent ? model.lastCliSessionId : undefined;
+		const cliSession = this._claudeCliService.startSession(workspaceUri, options.query, sessionId, resumeId);
 
 		// Wire up stream events → observable state
 		this._register(cliSession.onDidEmitEvent(event => {

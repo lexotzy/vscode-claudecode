@@ -107,6 +107,7 @@ class ClaudeCliSession extends Disposable implements IClaudeCliSession {
 		private readonly _claudePath: string,
 		private readonly _prompt: string,
 		private readonly _logService: ILogService,
+		private readonly _resumeSessionId?: string,
 	) {
 		super();
 		// Start HTTP approval server first, then spawn the CLI once we have the port.
@@ -197,6 +198,11 @@ class ClaudeCliSession extends Disposable implements IClaudeCliSession {
 			'--output-format', 'stream-json',
 			'--verbose',
 		];
+
+		if (this._resumeSessionId) {
+			args.push('--resume', this._resumeSessionId);
+			this._logService.info(`[ClaudeCliSession] resuming CLI session ${this._resumeSessionId}`);
+		}
 
 		if (permissionPort !== undefined) {
 			const approvalUrl = `http://127.0.0.1:${permissionPort}/approve`;
@@ -316,7 +322,7 @@ export class ClaudeCliService extends Disposable implements IClaudeCliService {
 		}
 	}
 
-	startSession(workspaceUri: URI, prompt: string, sessionId: string): IClaudeCliSession {
+	startSession(workspaceUri: URI, prompt: string, sessionId: string, resumeSessionId?: string): IClaudeCliSession {
 		if (!this.claudePath) {
 			throw new Error('Claude Code CLI not found. Please install it from https://claude.ai/code');
 		}
@@ -324,7 +330,7 @@ export class ClaudeCliService extends Disposable implements IClaudeCliService {
 		// Dispose any existing session for this workspace
 		this.stopSession(workspaceUri);
 
-		const session = new ClaudeCliSession(sessionId, workspaceUri, this.claudePath, prompt, this._logService);
+		const session = new ClaudeCliSession(sessionId, workspaceUri, this.claudePath, prompt, this._logService, resumeSessionId);
 
 		const key = workspaceUri.toString();
 		this._sessions.set(key, session);

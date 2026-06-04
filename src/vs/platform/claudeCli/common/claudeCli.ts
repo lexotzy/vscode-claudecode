@@ -83,11 +83,13 @@ export interface IClaudeCliService {
 	 * Calling this while a session is already running for the same folder
 	 * disposes the previous session first.
 	 *
-	 * @param workspaceUri The workspace folder URI (fsPath used as cwd).
-	 * @param prompt The initial user prompt.
-	 * @param sessionId Stable identifier for this session (from the sessions provider).
+	 * @param workspaceUri    The workspace folder URI (fsPath used as cwd).
+	 * @param prompt          The initial user prompt.
+	 * @param sessionId       Stable identifier for this session (from the sessions provider).
+	 * @param resumeSessionId When provided, passes `--resume <id>` so Claude continues
+	 *                        the prior conversation instead of starting fresh.
 	 */
-	startSession(workspaceUri: URI, prompt: string, sessionId: string): IClaudeCliSession;
+	startSession(workspaceUri: URI, prompt: string, sessionId: string, resumeSessionId?: string): IClaudeCliSession;
 
 	/**
 	 * Returns the active session for a given workspace URI, if any.
