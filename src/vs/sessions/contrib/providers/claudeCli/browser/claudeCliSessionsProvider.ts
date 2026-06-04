@@ -23,6 +23,8 @@ import {
 } from '../../../../services/sessions/common/session.js';
 import { ISendRequestOptions, ISessionChangeEvent, ISessionModelPickerOptions, ISessionsProvider } from '../../../../services/sessions/common/sessionsProvider.js';
 import { ILanguageModelChatMetadataAndIdentifier } from '../../../../../workbench/contrib/chat/common/languageModels.js';
+import { IGitService } from '../../../../../workbench/contrib/git/common/gitService.js';
+import { ClaudeCliSessionChangeset } from './claudeCliChangesets.js';
 
 // ---------------------------------------------------------------------------
 // Session type & provider constants
@@ -35,6 +37,9 @@ export const ClaudeCliSessionType: ISessionType = {
 };
 
 const CLAUDE_CLI_PROVIDER_ID = 'claude-cli';
+
+// Tool names that write or modify files — used to trigger changeset refresh.
+const FILE_EDITING_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit']);
 
 // ---------------------------------------------------------------------------
 // Internal session model
@@ -76,16 +81,33 @@ class ClaudeCliChatModel extends Disposable {
 	private readonly _isArchived = observableValue<boolean>(this, false);
 	readonly isArchived = this._isArchived;
 
+	/** Increments each time Claude writes or edits a file; drives changeset refresh. */
+	private readonly _fileEditCount = observableValue<number>(this, 0);
+	readonly fileEditCount = this._fileEditCount;
+
+	/** Changeset that surfaces uncommitted git changes for this session. */
+	readonly changeset: ClaudeCliSessionChangeset;
+
 	/** Session ID reported by the CLI result event (for --continue). */
 	lastCliSessionId: string | undefined;
 	/** Whether this session has ever been sent (graduated from new → active). */
 	isSent = false;
 
-	constructor(workspaceUri: URI) {
+	constructor(workspaceUri: URI, gitService: IGitService) {
 		super();
 		this.resource = workspaceUri.with({ scheme: 'claude-cli-session', path: `/${Date.now()}` });
 		this.sessionId = toSessionId(CLAUDE_CLI_PROVIDER_ID, this.resource);
 		this.mainChat = observableValue<IChat>(this, this._buildChat());
+		this.changeset = new ClaudeCliSessionChangeset(
+			this.workspace,
+			this.status,
+			this.fileEditCount,
+			gitService,
+		);
+	}
+
+	incrementFileEditCount(): void {
+		this._fileEditCount.set(this._fileEditCount.get() + 1, undefined);
 	}
 
 	setTitle(title: string): void { this._title.set(title, undefined); }
@@ -150,6 +172,7 @@ export class ClaudeCliSessionsProvider extends Disposable implements ISessionsPr
 		@IClaudeCliService private readonly _claudeCliService: IClaudeCliService,
 		@ILogService private readonly _logService: ILogService,
 		@ILabelService private readonly _labelService: ILabelService,
+		@IGitService private readonly _gitService: IGitService,
 	) {
 		super();
 	}
@@ -202,7 +225,7 @@ export class ClaudeCliSessionsProvider extends Disposable implements ISessionsPr
 		if (!workspace) {
 			throw new Error(`[ClaudeCliProvider] Cannot resolve workspace for: ${workspaceUri.toString()}`);
 		}
-		const model = this._register(new ClaudeCliChatModel(workspaceUri));
+		const model = this._register(new ClaudeCliChatModel(workspaceUri, this._gitService));
 		model.setWorkspace(workspace);
 		this._newSessions.set(model.sessionId, model);
 		return this._toISession(model);
@@ -376,6 +399,11 @@ export class ClaudeCliSessionsProvider extends Disposable implements ISessionsPr
 					break;
 				}
 			}
+			// Increment file-edit counter when Claude writes or modifies a file,
+			// so the changeset triggers a git diff refresh.
+			if (content.some(b => isToolUseBlock(b) && FILE_EDITING_TOOLS.has(b.name))) {
+				model.incrementFileEditCount();
+			}
 			if (desc !== undefined) {
 				model.setDescription(desc);
 				model.setUpdatedAt(new Date());
@@ -402,7 +430,7 @@ export class ClaudeCliSessionsProvider extends Disposable implements ISessionsPr
 	private _toISession(model: ClaudeCliChatModel): ISession {
 		const singleChatObs = model.mainChat;
 		const chatsObs = singleChatObs.map(chat => [chat] as readonly IChat[]);
-		const changesets = constObservable<readonly ISessionChangeset[]>([]);
+		const changesets = constObservable<readonly ISessionChangeset[]>([model.changeset]);
 
 		return {
 			sessionId: model.sessionId,
