@@ -16,6 +16,9 @@ coverage/
 test_data/
 test-results/
 test-results.xml
+/playwright-report/
+/blob-report/
+/playwright/.cache/
 vscode.lsif
 vscode.db
 /.profile-oss
