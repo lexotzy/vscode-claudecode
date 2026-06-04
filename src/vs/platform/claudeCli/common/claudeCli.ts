@@ -12,6 +12,17 @@ import { ClaudeCliStreamEvent } from './streamJson.js';
 export const IClaudeCliService = createDecorator<IClaudeCliService>('claudeCliService');
 
 /**
+ * A pending tool-permission request forwarded from the Claude Code CLI via
+ * the `--permission-prompt-tool` MCP bridge.
+ */
+export interface IPermissionRequest {
+	readonly requestId: string;
+	readonly toolName: string;
+	readonly toolInput: Record<string, unknown>;
+	readonly description?: string;
+}
+
+/**
  * A running Claude Code CLI process bound to a workspace folder.
  */
 export interface IClaudeCliSession extends IDisposable {
@@ -24,11 +35,26 @@ export interface IClaudeCliSession extends IDisposable {
 	/** Fires once when the process exits, with the exit code. */
 	readonly onDidExit: Event<number>;
 
+	/**
+	 * Fires when the CLI requests permission for a tool use via the
+	 * `--permission-prompt-tool` MCP bridge.  Only fires when the in-process
+	 * HTTP approval server started successfully; callers MUST respond via
+	 * {@link respondToPermission} or the CLI will stall indefinitely.
+	 */
+	readonly onPermissionRequest: Event<IPermissionRequest>;
+
 	/** Send a follow-up message to a running interactive session (stdin). */
 	sendInput(text: string): void;
 
 	/** Terminate the underlying process. */
 	cancel(): void;
+
+	/**
+	 * Resolve a pending permission request.
+	 * @param requestId The {@link IPermissionRequest.requestId} to resolve.
+	 * @param allow     `true` = allow the tool use, `false` = deny it.
+	 */
+	respondToPermission(requestId: string, allow: boolean): void;
 }
 
 /**

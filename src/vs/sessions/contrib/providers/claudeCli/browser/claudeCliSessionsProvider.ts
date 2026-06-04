@@ -12,9 +12,10 @@ import { basename, dirname } from '../../../../../base/common/resources.js';
 import { ThemeIcon } from '../../../../../base/common/themables.js';
 import { URI } from '../../../../../base/common/uri.js';
 import { localize } from '../../../../../nls.js';
+import { IDialogService } from '../../../../../platform/dialogs/common/dialogs.js';
 import { ILabelService } from '../../../../../platform/label/common/label.js';
 import { ILogService } from '../../../../../platform/log/common/log.js';
-import { IClaudeCliService } from '../../../../../platform/claudeCli/common/claudeCli.js';
+import { IClaudeCliService, IPermissionRequest } from '../../../../../platform/claudeCli/common/claudeCli.js';
 import { ClaudeCliStreamEvent, isAssistantEvent, isResultEvent, isSystemInitEvent, isTextBlock, isToolUseBlock } from '../../../../../platform/claudeCli/common/streamJson.js';
 import {
 	IChat, IChatCheckpoints, ISession, ISessionCapabilities, ISessionChangeset,
@@ -173,6 +174,7 @@ export class ClaudeCliSessionsProvider extends Disposable implements ISessionsPr
 		@ILogService private readonly _logService: ILogService,
 		@ILabelService private readonly _labelService: ILabelService,
 		@IGitService private readonly _gitService: IGitService,
+		@IDialogService private readonly _dialogService: IDialogService,
 	) {
 		super();
 	}
@@ -357,6 +359,10 @@ export class ClaudeCliSessionsProvider extends Disposable implements ISessionsPr
 			this._handleStreamEvent(model, event, iSession);
 		}));
 
+		this._register(cliSession.onPermissionRequest(req => {
+			this._handlePermissionRequest(req, cliSession);
+		}));
+
 		this._register(cliSession.onDidExit(code => {
 			const now = new Date();
 			if (model.status.get() === SessionStatus.InProgress) {
@@ -421,6 +427,31 @@ export class ClaudeCliSessionsProvider extends Disposable implements ISessionsPr
 			model.setUpdatedAt(now);
 			this._onDidChangeSessions.fire({ added: [], removed: [], changed: [iSession] });
 		}
+	}
+
+	private async _handlePermissionRequest(req: IPermissionRequest, session: import('../../../../../platform/claudeCli/common/claudeCli.js').IClaudeCliSession): Promise<void> {
+		const detail = this._formatPermissionDetail(req.toolName, req.toolInput);
+		const result = await this._dialogService.confirm({
+			type: 'question',
+			title: localize('claudeCli.permissionTitle', 'Allow tool use?'),
+			message: localize('claudeCli.permissionMsg', 'Claude Code wants to run: {0}', req.toolName),
+			detail,
+			primaryButton: localize('claudeCli.allow', 'Allow'),
+		});
+		session.respondToPermission(req.requestId, result.confirmed);
+		this._logService.info(`[ClaudeCliProvider] permission for '${req.toolName}' → ${result.confirmed ? 'allowed' : 'denied'}`);
+	}
+
+	private _formatPermissionDetail(toolName: string, input: Record<string, unknown>): string {
+		const lines: string[] = [];
+		for (const [key, val] of Object.entries(input)) {
+			const str = typeof val === 'string' ? val : JSON.stringify(val);
+			lines.push(`${key}: ${str.length > 120 ? str.slice(0, 120) + '…' : str}`);
+			if (lines.length >= 4) {
+				break;
+			}
+		}
+		return lines.length > 0 ? lines.join('\n') : toolName;
 	}
 
 	private _findModel(sessionId: string): ClaudeCliChatModel | undefined {
