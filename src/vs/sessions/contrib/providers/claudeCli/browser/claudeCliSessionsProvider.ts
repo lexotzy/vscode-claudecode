@@ -27,6 +27,7 @@ import {
 } from '../../../../services/sessions/common/session.js';
 import { ISendRequestOptions, ISessionChangeEvent, ISessionModelPickerOptions, ISessionsProvider } from '../../../../services/sessions/common/sessionsProvider.js';
 import { ILanguageModelChatMetadataAndIdentifier } from '../../../../../workbench/contrib/chat/common/languageModels.js';
+import { ExtensionIdentifier } from '../../../../../platform/extensions/common/extensions.js';
 import { IGitService } from '../../../../../workbench/contrib/git/common/gitService.js';
 import { ClaudeCliSessionChangeset } from './claudeCliChangesets.js';
 
@@ -43,6 +44,40 @@ export const ClaudeCliSessionType: ISessionType = {
 const CLAUDE_CLI_PROVIDER_ID = 'claude-cli';
 
 const FILE_EDITING_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit']);
+
+const _claudeExt = new ExtensionIdentifier('anthropic.claude-code');
+const CLAUDE_MODELS: ILanguageModelChatMetadataAndIdentifier[] = [
+	{
+		identifier: 'claude-haiku-4-5',
+		metadata: {
+			extension: _claudeExt, name: 'Claude Haiku 4.5', id: 'claude-haiku-4-5',
+			vendor: 'anthropic', version: '4.5', family: 'claude-haiku',
+			maxInputTokens: 200000, maxOutputTokens: 8096, isDefaultForLocation: {},
+			isUserSelectable: true, capabilities: { agentMode: true, toolCalling: true },
+			targetChatSessionType: CLAUDE_CLI_PROVIDER_ID,
+		}
+	},
+	{
+		identifier: 'claude-sonnet-4-6',
+		metadata: {
+			extension: _claudeExt, name: 'Claude Sonnet 4.6', id: 'claude-sonnet-4-6',
+			vendor: 'anthropic', version: '4.6', family: 'claude-sonnet',
+			maxInputTokens: 200000, maxOutputTokens: 64000, isDefaultForLocation: {},
+			isUserSelectable: true, capabilities: { agentMode: true, toolCalling: true },
+			targetChatSessionType: CLAUDE_CLI_PROVIDER_ID,
+		}
+	},
+	{
+		identifier: 'claude-opus-4-8',
+		metadata: {
+			extension: _claudeExt, name: 'Claude Opus 4.8', id: 'claude-opus-4-8',
+			vendor: 'anthropic', version: '4.8', family: 'claude-opus',
+			maxInputTokens: 200000, maxOutputTokens: 32000, isDefaultForLocation: {},
+			isUserSelectable: true, capabilities: { agentMode: true, toolCalling: true },
+			targetChatSessionType: CLAUDE_CLI_PROVIDER_ID,
+		}
+	},
+];
 
 // ---------------------------------------------------------------------------
 // Internal session model
@@ -83,6 +118,8 @@ class ClaudeCliChatModel extends Disposable {
 	private readonly _fileEditCount = observableValue<number>(this, 0);
 	readonly fileEditCount = this._fileEditCount;
 
+	private readonly _selectedModelId = observableValue<string | undefined>(this, 'claude-sonnet-4-6');
+
 	readonly changeset: ClaudeCliSessionChangeset;
 
 	lastCliSessionId: string | undefined;
@@ -114,6 +151,7 @@ class ClaudeCliChatModel extends Disposable {
 	setLastTurnEnd(date: Date): void { this._lastTurnEnd.set(date, undefined); }
 	setWorkspace(ws: ISessionWorkspace): void { this._workspaceData.set(ws, undefined); }
 	setArchived(archived: boolean): void { this._isArchived.set(archived, undefined); }
+	setSelectedModel(modelId: string): void { this._selectedModelId.set(modelId, undefined); }
 
 	private _buildChat(): IChat {
 		return {
@@ -124,7 +162,7 @@ class ClaudeCliChatModel extends Disposable {
 			status: this.status,
 			changes: constObservable([]),
 			checkpoints: constObservable<IChatCheckpoints | undefined>(undefined),
-			modelId: constObservable(undefined),
+			modelId: this._selectedModelId,
 			mode: constObservable(undefined),
 			isArchived: constObservable(false),
 			isRead: constObservable(true),
@@ -236,7 +274,7 @@ export class ClaudeCliSessionsProvider extends Disposable implements ISessionsPr
 	// -- Models --
 
 	getModels(_sessionId: string): readonly ILanguageModelChatMetadataAndIdentifier[] {
-		return [];
+		return CLAUDE_MODELS;
 	}
 
 	getModelPickerOptions(_sessionId: string): ISessionModelPickerOptions {
@@ -248,8 +286,9 @@ export class ClaudeCliSessionsProvider extends Disposable implements ISessionsPr
 		};
 	}
 
-	setModel(_sessionId: string, _modelId: string): void {
-		// Claude Code CLI manages its own model
+	setModel(sessionId: string, modelId: string): void {
+		const model = this._findModel(sessionId) ?? this._newSessions.get(sessionId);
+		model?.setSelectedModel(modelId);
 	}
 
 	// -- Session Actions --
@@ -410,7 +449,8 @@ export class ClaudeCliSessionsProvider extends Disposable implements ISessionsPr
 		);
 
 		const resumeId = model.isSent ? model.lastCliSessionId : undefined;
-		await this._claudeCliService.startSession(sessionId, workspaceUri.fsPath, options.query, resumeId);
+		const modelId = model.mainChat.get().modelId?.get();
+		await this._claudeCliService.startSession(sessionId, workspaceUri.fsPath, options.query, resumeId, modelId);
 
 		return iSession;
 	}

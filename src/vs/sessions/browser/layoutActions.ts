@@ -18,6 +18,8 @@ import { IsAuxiliaryWindowContext, IsWindowAlwaysOnTopContext, SideBarVisibleCon
 import { IWorkbenchLayoutService, Parts } from '../../workbench/services/layout/browser/layoutService.js';
 import { SessionsWelcomeVisibleContext } from '../common/contextkeys.js';
 import { mainWindow } from '../../base/browser/window.js';
+import { IHostService } from '../../workbench/services/host/browser/host.js';
+import { IWorkspaceContextService } from '../../platform/workspace/common/workspace.js';
 
 // Register Icons
 const panelCloseIcon = registerIcon('agent-panel-close', Codicon.close, localize('agentPanelCloseIcon', "Icon to close the panel."));
@@ -149,9 +151,40 @@ class TogglePanelVisibilityAction extends Action2 {
 	}
 }
 
+class SwitchToEditorAction extends Action2 {
+	static readonly ID = 'workbench.action.agentSwitchToEditor';
+
+	constructor() {
+		super({
+			id: SwitchToEditorAction.ID,
+			title: localize2('switchToEditor', 'Open in Editor'),
+			icon: Codicon.code,
+			menu: [
+				{
+					id: Menus.TitleBarLeftLayout,
+					group: 'navigation',
+					order: -1,
+				}
+			]
+		});
+	}
+
+	async run(accessor: ServicesAccessor): Promise<void> {
+		const hostService = accessor.get(IHostService);
+		const workspaceService = accessor.get(IWorkspaceContextService);
+		const folders = workspaceService.getWorkspace().folders;
+		if (folders.length > 0) {
+			await hostService.openWindow([{ folderUri: folders[0].uri }]);
+		} else {
+			await hostService.openWindow();
+		}
+	}
+}
+
 registerAction2(ToggleSidebarVisibilityAction);
 registerAction2(ToggleSecondarySidebarVisibilityAction);
 registerAction2(TogglePanelVisibilityAction);
+registerAction2(SwitchToEditorAction);
 
 // Floating window controls: always-on-top
 MenuRegistry.appendMenuItem(Menus.TitleBarRightLayout, {

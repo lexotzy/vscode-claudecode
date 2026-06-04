@@ -53,7 +53,7 @@ export interface IClaudeCliService {
 	 * Spawns a Claude CLI process for the given workspace.
 	 * Events for this session are tagged with `sessionId` on the service-level emitters.
 	 */
-	startSession(sessionId: string, workspacePath: string, prompt: string, resumeCliSessionId?: string): Promise<void>;
+	startSession(sessionId: string, workspacePath: string, prompt: string, resumeCliSessionId?: string, modelId?: string): Promise<void>;
 
 	/** Terminates the CLI process for the given session and cleans up resources. */
 	stopSession(sessionId: string): Promise<void>;

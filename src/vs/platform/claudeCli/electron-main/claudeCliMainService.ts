@@ -108,7 +108,7 @@ export class ClaudeCliMainService extends Disposable implements IClaudeCliServic
 		return !!this._resolveClaudePath();
 	}
 
-	async startSession(sessionId: string, workspacePath: string, prompt: string, resumeCliSessionId?: string): Promise<void> {
+	async startSession(sessionId: string, workspacePath: string, prompt: string, resumeCliSessionId?: string, modelId?: string): Promise<void> {
 		const claudePath = this._resolveClaudePath();
 		if (!claudePath) {
 			throw new Error('Claude Code CLI not found. Install from https://claude.ai/code');
@@ -122,7 +122,7 @@ export class ClaudeCliMainService extends Disposable implements IClaudeCliServic
 			this._logService.warn(`[ClaudeCliMainService] permission server failed (${(err as Error)?.message ?? err}); spawning without approval bridge`);
 		}
 
-		this._spawnCli(sessionId, claudePath, workspacePath, prompt, permissionPort, resumeCliSessionId);
+		this._spawnCli(sessionId, claudePath, workspacePath, prompt, permissionPort, resumeCliSessionId, modelId);
 	}
 
 	async stopSession(sessionId: string): Promise<void> {
@@ -282,12 +282,18 @@ export class ClaudeCliMainService extends Disposable implements IClaudeCliServic
 		prompt: string,
 		permissionPort: number | undefined,
 		resumeCliSessionId?: string,
+		modelId?: string,
 	): void {
 		const args: string[] = [
 			'-p', prompt,
 			'--output-format', 'stream-json',
 			'--verbose',
 		];
+
+		if (modelId) {
+			args.push('--model', modelId);
+			this._logService.info(`[ClaudeCliMainService] using model: ${modelId}`);
+		}
 
 		if (resumeCliSessionId) {
 			args.push('--resume', resumeCliSessionId);
