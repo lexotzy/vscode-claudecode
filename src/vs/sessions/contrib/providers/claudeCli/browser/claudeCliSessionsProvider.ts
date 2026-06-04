@@ -18,7 +18,7 @@ import { ILogService } from '../../../../../platform/log/common/log.js';
 import { IOpenerService } from '../../../../../platform/opener/common/opener.js';
 import { Registry } from '../../../../../platform/registry/common/platform.js';
 import { Extensions, IOutputChannel, IOutputChannelRegistry, IOutputService } from '../../../../../workbench/services/output/common/output.js';
-import { IClaudeCliService, IPermissionRequest } from '../../../../../platform/claudeCli/common/claudeCli.js';
+import { IClaudeCliService, IClaudeCliPermissionPayload } from '../../../../../platform/claudeCli/common/claudeCli.js';
 import { ClaudeCliStreamEvent, isAssistantEvent, isResultEvent, isSystemInitEvent, isTextBlock, isThinkingBlock, isToolUseBlock } from '../../../../../platform/claudeCli/common/streamJson.js';
 import {
 	IChat, IChatCheckpoints, ISession, ISessionCapabilities, ISessionChangeset,
@@ -42,17 +42,12 @@ export const ClaudeCliSessionType: ISessionType = {
 
 const CLAUDE_CLI_PROVIDER_ID = 'claude-cli';
 
-// Tool names that write or modify files — used to trigger changeset refresh.
 const FILE_EDITING_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit']);
 
 // ---------------------------------------------------------------------------
 // Internal session model
 // ---------------------------------------------------------------------------
 
-/**
- * Mutable internal model for a single Claude Code CLI session.
- * Owns all observable state; the ISession facade is built from it.
- */
 class ClaudeCliChatModel extends Disposable {
 
 	readonly resource: URI;
@@ -85,16 +80,12 @@ class ClaudeCliChatModel extends Disposable {
 	private readonly _isArchived = observableValue<boolean>(this, false);
 	readonly isArchived = this._isArchived;
 
-	/** Increments each time Claude writes or edits a file; drives changeset refresh. */
 	private readonly _fileEditCount = observableValue<number>(this, 0);
 	readonly fileEditCount = this._fileEditCount;
 
-	/** Changeset that surfaces uncommitted git changes for this session. */
 	readonly changeset: ClaudeCliSessionChangeset;
 
-	/** Session ID reported by the CLI result event (for --continue). */
 	lastCliSessionId: string | undefined;
-	/** Whether this session has ever been sent (graduated from new → active). */
 	isSent = false;
 
 	constructor(workspaceUri: URI, gitService: IGitService) {
@@ -167,13 +158,9 @@ export class ClaudeCliSessionsProvider extends Disposable implements ISessionsPr
 	readonly browseActions = [];
 	readonly supportsLocalWorkspaces = true;
 
-	/** New sessions not yet sent. */
 	private readonly _newSessions = new DisposableMap<string, ClaudeCliChatModel>();
-	/** Committed sessions. */
 	private readonly _sessions = new Map<string, ClaudeCliChatModel>();
-	/** Per-send listener stores: replaced on each sendRequest so old listeners don't accumulate. */
 	private readonly _sendListeners = this._register(new DisposableMap<string, DisposableStore>());
-	/** Whether the Claude Code output channel has been registered with the registry. */
 	private _outputChannelRegistered = false;
 
 	constructor(
@@ -262,7 +249,7 @@ export class ClaudeCliSessionsProvider extends Disposable implements ISessionsPr
 	}
 
 	setModel(_sessionId: string, _modelId: string): void {
-		// Claude Code CLI manages its own model via CLI configuration
+		// Claude Code CLI manages its own model
 	}
 
 	// -- Session Actions --
@@ -289,10 +276,7 @@ export class ClaudeCliSessionsProvider extends Disposable implements ISessionsPr
 			return;
 		}
 		const iSession = this._toISession(model);
-		const workspaceRoot = model.workspace.get()?.folders[0]?.root;
-		if (workspaceRoot) {
-			this._claudeCliService.stopSession(workspaceRoot);
-		}
+		await this._claudeCliService.stopSession(model.sessionId);
 		this._sessions.delete(model.sessionId);
 		this._newSessions.deleteAndDispose(model.sessionId);
 		this._sendListeners.deleteAndDispose(model.sessionId);
@@ -301,7 +285,6 @@ export class ClaudeCliSessionsProvider extends Disposable implements ISessionsPr
 	}
 
 	async deleteChat(sessionId: string, _chatUri: URI): Promise<void> {
-		// No multi-chat support — deleting the chat deletes the whole session
 		return this.deleteSession(sessionId);
 	}
 
@@ -314,7 +297,6 @@ export class ClaudeCliSessionsProvider extends Disposable implements ISessionsPr
 	}
 
 	async createNewChat(sessionId: string, _prompt?: string): Promise<IChat> {
-		// Single-chat sessions only — return the existing main chat
 		const model = this._findModel(sessionId) ?? this._newSessions.get(sessionId);
 		if (!model) {
 			throw new Error(`[ClaudeCliProvider] Session '${sessionId}' not found`);
@@ -333,7 +315,8 @@ export class ClaudeCliSessionsProvider extends Disposable implements ISessionsPr
 			throw new Error(`[ClaudeCliProvider] Session '${sessionId}' not found`);
 		}
 
-		if (!this._claudeCliService.isAvailable) {
+		const available = await this._claudeCliService.checkIsAvailable();
+		if (!available) {
 			throw new Error('[ClaudeCliProvider] Claude Code CLI not found. Install from https://claude.ai/code');
 		}
 
@@ -342,7 +325,7 @@ export class ClaudeCliSessionsProvider extends Disposable implements ISessionsPr
 			throw new Error('[ClaudeCliProvider] No workspace folder available for session');
 		}
 
-		// Check auth before touching model state — bail early without side effects
+		// Auth gate — bail early without mutating model state.
 		const authStatus = await this._claudeCliService.checkAuthStatus();
 		if (authStatus === 'unauthenticated') {
 			this._logService.warn('[ClaudeCliProvider] Claude Code not authenticated — prompting login');
@@ -359,7 +342,6 @@ export class ClaudeCliSessionsProvider extends Disposable implements ISessionsPr
 			return this._toISession(model);
 		}
 
-		// Set initial state
 		const title = options.query.split('\n')[0].substring(0, 100) || localize('newSession', 'New Session');
 		model.setTitle(title);
 		model.setStatus(SessionStatus.InProgress);
@@ -368,7 +350,6 @@ export class ClaudeCliSessionsProvider extends Disposable implements ISessionsPr
 
 		const iSession = this._toISession(model);
 
-		// Publish session if this is the first send
 		if (newModel) {
 			this._newSessions.deleteAndLeak(sessionId);
 			this._sessions.set(sessionId, model);
@@ -378,49 +359,58 @@ export class ClaudeCliSessionsProvider extends Disposable implements ISessionsPr
 			this._onDidChangeSessions.fire({ added: [], removed: [], changed: [iSession] });
 		}
 
-		// Start the CLI process — resume prior conversation when possible.
-		const resumeId = model.isSent ? model.lastCliSessionId : undefined;
-		const cliSession = this._claudeCliService.startSession(workspaceUri, options.query, sessionId, resumeId);
-
-		// Wire up stream events → observable state.
-		// Use a per-send DisposableStore so that re-sending on the same session
-		// (multi-turn) automatically disposes the previous process's listeners.
+		// Wire listeners BEFORE starting the session so no early events are missed.
 		const listeners = new DisposableStore();
 		this._sendListeners.set(sessionId, listeners);
 
-		// Open the output channel and write a session header.
 		const outputChannel = this._getOutputChannel();
 		if (outputChannel) {
 			const ts = new Date().toLocaleTimeString();
 			outputChannel.append(`\n[${ts}] === ${title} ===\nWorkspace: ${workspaceUri.fsPath}\n`);
 		}
 
-		listeners.add(cliSession.onDidEmitEvent(event => {
-			this._handleStreamEvent(model, event, iSession);
-			if (outputChannel) {
-				this._writeEventToOutput(outputChannel, event);
-			}
-		}));
+		listeners.add(
+			Event.filter(this._claudeCliService.onDidSessionData, e => e.sessionId === sessionId)(payload => {
+				let event: ClaudeCliStreamEvent;
+				try {
+					event = JSON.parse(payload.line) as ClaudeCliStreamEvent;
+				} catch {
+					return;
+				}
+				this._handleStreamEvent(model, event, iSession);
+				if (outputChannel) {
+					this._writeEventToOutput(outputChannel, event);
+				}
+			})
+		);
 
-		listeners.add(cliSession.onPermissionRequest(req => {
-			this._handlePermissionRequest(req, cliSession);
-		}));
+		listeners.add(
+			Event.filter(this._claudeCliService.onDidPermissionRequest, e => e.sessionId === sessionId)(req => {
+				this._handlePermissionRequest(req);
+			})
+		);
 
-		listeners.add(cliSession.onDidExit(code => {
-			const now = new Date();
-			if (model.status.get() === SessionStatus.InProgress) {
-				model.setStatus(code === 0 ? SessionStatus.Completed : SessionStatus.Error);
-			}
-			if (code !== 0) {
-				model.setDescription(localize('claudeCli.exitError', 'Claude Code exited with code {0}', code));
-			} else {
-				model.setDescription(undefined);
-			}
-			model.setLastTurnEnd(now);
-			model.setUpdatedAt(now);
-			this._onDidChangeSessions.fire({ added: [], removed: [], changed: [iSession] });
-			this._logService.info(`[ClaudeCliProvider] Session ${sessionId} CLI process exited with code ${code}`);
-		}));
+		listeners.add(
+			Event.filter(this._claudeCliService.onDidSessionEnd, e => e.sessionId === sessionId)(payload => {
+				const now = new Date();
+				const code = payload.code;
+				if (model.status.get() === SessionStatus.InProgress) {
+					model.setStatus(code === 0 ? SessionStatus.Completed : SessionStatus.Error);
+				}
+				if (code !== 0) {
+					model.setDescription(localize('claudeCli.exitError', 'Claude Code exited with code {0}', code ?? -1));
+				} else {
+					model.setDescription(undefined);
+				}
+				model.setLastTurnEnd(now);
+				model.setUpdatedAt(now);
+				this._onDidChangeSessions.fire({ added: [], removed: [], changed: [iSession] });
+				this._logService.info(`[ClaudeCliProvider] Session ${sessionId} CLI process exited with code ${code}`);
+			})
+		);
+
+		const resumeId = model.isSent ? model.lastCliSessionId : undefined;
+		await this._claudeCliService.startSession(sessionId, workspaceUri.fsPath, options.query, resumeId);
 
 		return iSession;
 	}
@@ -448,8 +438,6 @@ export class ClaudeCliSessionsProvider extends Disposable implements ISessionsPr
 					break;
 				}
 			}
-			// Increment file-edit counter when Claude writes or modifies a file,
-			// so the changeset triggers a git diff refresh.
 			if (content.some(b => isToolUseBlock(b) && FILE_EDITING_TOOLS.has(b.name))) {
 				model.incrementFileEditCount();
 			}
@@ -472,7 +460,7 @@ export class ClaudeCliSessionsProvider extends Disposable implements ISessionsPr
 		}
 	}
 
-	private async _handlePermissionRequest(req: IPermissionRequest, session: import('../../../../../platform/claudeCli/common/claudeCli.js').IClaudeCliSession): Promise<void> {
+	private async _handlePermissionRequest(req: IClaudeCliPermissionPayload): Promise<void> {
 		const detail = this._formatPermissionDetail(req.toolName, req.toolInput);
 		const result = await this._dialogService.confirm({
 			type: 'question',
@@ -481,7 +469,7 @@ export class ClaudeCliSessionsProvider extends Disposable implements ISessionsPr
 			detail,
 			primaryButton: localize('claudeCli.allow', 'Allow'),
 		});
-		session.respondToPermission(req.requestId, result.confirmed);
+		await this._claudeCliService.respondToPermission(req.requestId, result.confirmed);
 		this._logService.info(`[ClaudeCliProvider] permission for '${req.toolName}' → ${result.confirmed ? 'allowed' : 'denied'}`);
 	}
 

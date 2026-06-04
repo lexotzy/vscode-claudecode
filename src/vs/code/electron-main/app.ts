@@ -142,6 +142,8 @@ import { NativeWebContentExtractorService } from '../../platform/webContentExtra
 import { AgentNetworkFilterService, IAgentNetworkFilterService } from '../../platform/networkFilter/common/networkFilterService.js';
 import { ITerminalSandboxService, NullTerminalSandboxService } from '../../platform/sandbox/common/terminalSandboxService.js';
 import ErrorTelemetry from '../../platform/telemetry/electron-main/errorTelemetry.js';
+import { IClaudeCliService } from '../../platform/claudeCli/common/claudeCli.js';
+import { ClaudeCliMainService } from '../../platform/claudeCli/electron-main/claudeCliMainService.js';
 
 /**
  * The main VS Code application. There will only ever be one instance,
@@ -1164,6 +1166,9 @@ export class CodeApplication extends Disposable {
 		);
 		services.set(ILocalPtyService, ptyHostService);
 
+		// Claude CLI
+		services.set(IClaudeCliService, new SyncDescriptor(ClaudeCliMainService));
+
 		// Agent Host
 		if (isAgentHostEnabled(this.configurationService)) {
 			const agentHostStarter = new ElectronAgentHostStarter(this.configurationService, this.environmentMainService, this.lifecycleMainService, this.logService);
@@ -1351,6 +1356,10 @@ export class CodeApplication extends Disposable {
 		// Sandbox Helper
 		const sandboxHelperChannel = ProxyChannel.fromService(accessor.get(ISandboxHelperMainService), disposables);
 		mainProcessElectronServer.registerChannel('sandboxHelper', sandboxHelperChannel);
+
+		// Claude CLI
+		const claudeCliChannel = ProxyChannel.fromService(accessor.get(IClaudeCliService), disposables);
+		mainProcessElectronServer.registerChannel('claudeCli', claudeCliChannel);
 
 		// MCP
 		const mcpDiscoveryChannel = ProxyChannel.fromService(accessor.get(INativeMcpDiscoveryHelperService), disposables);
