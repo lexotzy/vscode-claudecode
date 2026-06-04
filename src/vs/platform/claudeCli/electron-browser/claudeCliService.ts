@@ -6,6 +6,7 @@
 import { Emitter } from '../../../base/common/event.js';
 import { Disposable } from '../../../base/common/lifecycle.js';
 import { URI } from '../../../base/common/uri.js';
+import { IConfigurationService } from '../../configuration/common/configuration.js';
 import { ILogService } from '../../log/common/log.js';
 import { InstantiationType, registerSingleton } from '../../instantiation/common/extensions.js';
 import { IClaudeCliService, IClaudeCliSession, IPermissionRequest } from '../common/claudeCli.js';
@@ -310,9 +311,11 @@ export class ClaudeCliService extends Disposable implements IClaudeCliService {
 
 	constructor(
 		@ILogService private readonly _logService: ILogService,
+		@IConfigurationService configurationService: IConfigurationService,
 	) {
 		super();
-		this.claudePath = findClaudePathInline() ?? findViaPathEnv();
+		const configuredPath = configurationService.getValue<string>('claudeCode.path');
+		this.claudePath = resolveClaudePath(configuredPath) ?? findClaudePathInline() ?? findViaPathEnv();
 		this.isAvailable = !!this.claudePath;
 
 		if (this.isAvailable) {
@@ -368,6 +371,19 @@ export class ClaudeCliService extends Disposable implements IClaudeCliService {
 }
 
 registerSingleton(IClaudeCliService, ClaudeCliService, InstantiationType.Delayed);
+
+/**
+ * Validates a user-configured claude path.
+ * Returns the path if it exists and is non-empty, otherwise undefined.
+ */
+function resolveClaudePath(configured: string | undefined): string | undefined {
+	if (!configured || !configured.trim()) {
+		return undefined;
+	}
+	const { existsSync } = require('fs') as typeof import('fs');
+	const trimmed = configured.trim();
+	return existsSync(trimmed) ? trimmed : undefined;
+}
 
 /**
  * Inlined binary discovery (mirrors findClaude.ts without the node/ import).
