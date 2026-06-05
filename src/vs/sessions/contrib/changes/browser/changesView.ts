@@ -15,7 +15,6 @@ import { Codicon } from '../../../../base/common/codicons.js';
 import { Disposable, DisposableStore, IDisposable } from '../../../../base/common/lifecycle.js';
 import { Event } from '../../../../base/common/event.js';
 import { autorun, derived, derivedObservableWithCache, derivedOpts, IObservable, observableFromEvent, observableValue } from '../../../../base/common/observable.js';
-import { CountBadge } from '../../../../base/browser/ui/countBadge/countBadge.js';
 import { ProgressBar } from '../../../../base/browser/ui/progressbar/progressbar.js';
 import { basename, isEqual } from '../../../../base/common/resources.js';
 import { ThemeIcon } from '../../../../base/common/themables.js';
@@ -41,7 +40,7 @@ import { IOpenerService } from '../../../../platform/opener/common/opener.js';
 import { IStorageService } from '../../../../platform/storage/common/storage.js';
 import { ITelemetryService } from '../../../../platform/telemetry/common/telemetry.js';
 import { IThemeService } from '../../../../platform/theme/common/themeService.js';
-import { defaultCountBadgeStyles, defaultProgressBarStyles } from '../../../../platform/theme/browser/defaultStyles.js';
+import { defaultProgressBarStyles } from '../../../../platform/theme/browser/defaultStyles.js';
 import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
 import { fillEditorsDragData } from '../../../../workbench/browser/dnd.js';
 import { ResourceLabels } from '../../../../workbench/browser/labels.js';
@@ -65,7 +64,6 @@ import { Orientation } from '../../../../base/browser/ui/sash/sash.js';
 import { IView, Sizing, SplitView } from '../../../../base/browser/ui/splitview/splitview.js';
 import { Color } from '../../../../base/common/color.js';
 import { PANEL_SECTION_BORDER } from '../../../../workbench/common/theme.js';
-import { EditorResourceAccessor, SideBySideEditor } from '../../../../workbench/common/editor.js';
 import { logChangesViewFileSelect, logChangesViewVersionModeChange, logChangesViewViewModeChange } from '../../../common/sessionsTelemetry.js';
 import { ChecksViewModel } from './checksViewModel.js';
 // eslint-disable-next-line local/code-import-patterns -- TODO: move skill button constants out of providers
@@ -901,78 +899,6 @@ export class ChangesViewPane extends ViewPane {
 		}
 	}
 
-	private renderSidebarList(
-		container: HTMLElement,
-		onDidLayout: Event<{ readonly height: number; readonly width: number }>,
-		items: IChangesFileItem[],
-		openFileItem: (item: IChangesFileItem, items: IChangesFileItem[], sideBySide: boolean, preserveFocus: boolean, pinned: boolean, includeSidebar: boolean) => void,
-	): IDisposable {
-		const disposables = new DisposableStore();
-
-		container.classList.add('changes-file-list');
-
-		const viewMode = this.viewModel.viewModeObs.get();
-		container.classList.toggle('list-mode', viewMode === ChangesViewMode.List);
-
-		// "Changes" header
-		const headerNode = dom.append(container, $('.changes-sidebar-header'));
-		const headerLabel = dom.append(headerNode, $('span'));
-		headerLabel.textContent = localize('changes', "Changes");
-		const countBadge = disposables.add(new CountBadge(headerNode, { count: items.length }, defaultCountBadgeStyles));
-		countBadge.setCount(items.length);
-
-		const tree = this.createChangesTree(container, Event.None, disposables, () => tree.getSelection().filter(item => !!item && isChangesFileItem(item)));
-
-		if (viewMode === ChangesViewMode.Tree) {
-			tree.setChildren(null, buildTreeChildren(items, this.getTreeRootInfo(items)));
-		} else {
-			tree.setChildren(null, items.map(item => ({ element: item as ChangesTreeElement, collapsible: false })));
-		}
-
-		// Open file on selection. The `updatingSelection` guard relies on
-		// `tree.setFocus`/`setSelection` firing events synchronously.
-		let updatingSelection = false;
-		disposables.add(tree.onDidOpen(e => {
-			if (e.element && isChangesFileItem(e.element) && !updatingSelection) {
-				openFileItem(e.element, items, e.sideBySide, !!e.editorOptions.preserveFocus, !!e.editorOptions.pinned, false /* preserve existing sidebar */);
-			}
-		}));
-
-		// Track active editor and highlight in sidebar
-		disposables.add(Event.runAndSubscribe(this.editorService.onDidActiveEditorChange, () => {
-			const activeEditor = this.editorService.activeEditor;
-			if (!activeEditor) {
-				return;
-			}
-
-			const primaryResource = EditorResourceAccessor.getCanonicalUri(activeEditor, { supportSideBySide: SideBySideEditor.PRIMARY });
-			const secondaryResource = EditorResourceAccessor.getCanonicalUri(activeEditor, { supportSideBySide: SideBySideEditor.SECONDARY });
-
-			const index = items.findIndex(i =>
-				(primaryResource !== undefined && isEqual(i.uri, primaryResource)) ||
-				(secondaryResource !== undefined && i.originalUri !== undefined && isEqual(i.originalUri, secondaryResource))
-			);
-			if (index >= 0) {
-				updatingSelection = true;
-				try {
-					tree.setFocus([items[index]]);
-					tree.setSelection([items[index]]);
-					tree.reveal(items[index]);
-				} finally {
-					updatingSelection = false;
-				}
-			}
-		}));
-
-		// Layout on resize, accounting for the header height
-		disposables.add(onDidLayout(e => {
-			const headerHeight = headerNode.offsetHeight;
-			tree.layout(Math.max(0, e.height - headerHeight), e.width);
-		}));
-
-		return disposables;
-	}
-
 	private createChangesTree(
 		container: HTMLElement,
 		onDidChangeVisibility: Event<boolean>,
@@ -1060,36 +986,15 @@ export class ChangesViewPane extends ViewPane {
 		await this._openMultiFileDiffEditor(resource);
 	}
 
-	private async _openFileItem(item: IChangesFileItem, items: IChangesFileItem[], sideBySide: boolean, preserveFocus: boolean, pinned: boolean, includeSidebar: boolean): Promise<void> {
+	private async _openFileItem(item: IChangesFileItem, _items: IChangesFileItem[], sideBySide: boolean, preserveFocus: boolean, pinned: boolean, _includeSidebar: boolean): Promise<void> {
 		const { uri: modifiedFileUri, originalUri, isDeletion } = item;
-		const currentIndex = items.indexOf(item);
-
-		const sidebar = includeSidebar ? {
-			render: (container: unknown, onDidLayout: Event<{ readonly height: number; readonly width: number }>) => {
-				return this.renderSidebarList(container as HTMLElement, onDidLayout, items, this._openFileItem.bind(this));
-			}
-		} : undefined;
-
-		const navigation = {
-			total: items.length,
-			current: currentIndex,
-			navigate: (index: number) => {
-				const target = items[index];
-				if (target) {
-					this._openFileItem(target, items, false, false, false, includeSidebar);
-				}
-			}
-		};
 
 		const group = sideBySide ? SIDE_GROUP : ACTIVE_GROUP;
 		const labels = getChangesEditorLabels(item.uri, this.labelService);
+		const options = { preserveFocus, pinned };
 
 		if (isDeletion && originalUri) {
-			this.editorService.openEditor({
-				resource: originalUri,
-				...labels,
-				options: { preserveFocus, pinned, modal: { sidebar, navigation } }
-			}, group);
+			this.editorService.openEditor({ resource: originalUri, ...labels, options }, group);
 			return;
 		}
 
@@ -1098,16 +1003,12 @@ export class ChangesViewPane extends ViewPane {
 				original: { resource: originalUri },
 				modified: { resource: modifiedFileUri },
 				...labels,
-				options: { preserveFocus, pinned, modal: { sidebar, navigation } }
+				options,
 			}, group);
 			return;
 		}
 
-		this.editorService.openEditor({
-			resource: modifiedFileUri,
-			...labels,
-			options: { preserveFocus, pinned, modal: { sidebar, navigation } }
-		}, group);
+		this.editorService.openEditor({ resource: modifiedFileUri, ...labels, options }, group);
 	}
 
 	private async _openSingleFileDiffEditor(item: IChangesFileItem, sideBySide: boolean, preserveFocus: boolean, pinned: boolean): Promise<void> {

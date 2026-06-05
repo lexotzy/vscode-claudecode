@@ -920,7 +920,7 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 		editorPartContainer.setAttribute('role', 'main');
 
 		mark('code/willCreatePart/workbench.parts.editor');
-		this.getPart(Parts.EDITOR_PART).create(editorPartContainer, { restorePreviousState: false });
+		this.getPart(Parts.EDITOR_PART).create(editorPartContainer, { restorePreviousState: true });
 		mark('code/didCreatePart/workbench.parts.editor');
 
 		this.mainContainer.appendChild(editorPartContainer);
@@ -966,7 +966,8 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 	}
 
 	private restoreParts(): void {
-		// Open default view containers for each visible part
+		// Open view containers for each visible part — prefer last-active so the
+		// user's mode (editor vs agent) is preserved across restarts.
 		const partsToRestore: { location: ViewContainerLocation; visible: boolean }[] = [
 			{ location: ViewContainerLocation.Sidebar, visible: this.partVisibility.sidebar },
 			{ location: ViewContainerLocation.Panel, visible: this.partVisibility.panel },
@@ -975,9 +976,10 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 
 		for (const { location, visible } of partsToRestore) {
 			if (visible) {
-				const defaultViewContainer = this.viewDescriptorService.getDefaultViewContainer(location);
-				if (defaultViewContainer) {
-					this.paneCompositeService.openPaneComposite(defaultViewContainer.id, location);
+				const lastActive = this.paneCompositeService.getLastActivePaneCompositeId(location);
+				const containerToOpen = lastActive ?? this.viewDescriptorService.getDefaultViewContainer(location)?.id;
+				if (containerToOpen) {
+					this.paneCompositeService.openPaneComposite(containerToOpen, location);
 				}
 			}
 		}

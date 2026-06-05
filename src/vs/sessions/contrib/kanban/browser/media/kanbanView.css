@@ -1,0 +1,180 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+.agent-sessions-kanban {
+	display: flex;
+	flex-direction: row;
+	height: 100%;
+	overflow-x: auto;
+	padding: 8px;
+	gap: 8px;
+	box-sizing: border-box;
+}
+
+.kanban-column {
+	flex: 1;
+	min-width: 140px;
+	display: flex;
+	flex-direction: column;
+	overflow: hidden;
+}
+
+.kanban-column-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: 4px 6px 6px;
+	gap: 6px;
+}
+
+.kanban-column-title {
+	font-size: 11px;
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: 0.05em;
+	color: var(--vscode-sideBarSectionHeader-foreground);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.kanban-column-count {
+	font-size: 10px;
+	font-weight: 600;
+	padding: 1px 5px;
+	border-radius: 10px;
+	background: var(--vscode-badge-background);
+	color: var(--vscode-badge-foreground);
+	flex-shrink: 0;
+}
+
+.kanban-column-body {
+	flex: 1;
+	overflow-y: auto;
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+
+.kanban-column.planning > .kanban-column-header {
+	border-top: 2px solid var(--vscode-charts-blue, #2196f3);
+}
+
+.kanban-column.in-progress > .kanban-column-header {
+	border-top: 2px solid var(--vscode-charts-yellow, #f9a825);
+}
+
+.kanban-column.for-review > .kanban-column-header {
+	border-top: 2px solid var(--vscode-charts-orange, #ef6c00);
+}
+
+.kanban-column.done > .kanban-column-header {
+	border-top: 2px solid var(--vscode-charts-green, #388e3c);
+}
+
+.kanban-card {
+	padding: 7px 9px;
+	border-radius: 3px;
+	background: var(--vscode-editor-background);
+	border: 1px solid var(--vscode-panel-border, transparent);
+	cursor: pointer;
+	user-select: none;
+}
+
+.kanban-card:hover {
+	background: var(--vscode-list-hoverBackground);
+}
+
+.kanban-card:focus {
+	outline: 1px solid var(--vscode-focusBorder);
+}
+
+.kanban-card-title-row {
+	display: flex;
+	align-items: center;
+	gap: 5px;
+	margin-bottom: 5px;
+	min-width: 0;
+}
+
+.kanban-card-status-dot {
+	width: 6px;
+	height: 6px;
+	border-radius: 50%;
+	flex-shrink: 0;
+}
+
+.kanban-card-status-dot.in-progress {
+	background: var(--vscode-charts-yellow, #f9a825);
+	animation: kanban-pulse 1.5s ease-in-out infinite;
+}
+
+.kanban-card-status-dot.for-review {
+	background: var(--vscode-charts-orange, #ef6c00);
+}
+
+@keyframes kanban-pulse {
+	0%, 100% { opacity: 1; }
+	50% { opacity: 0.25; }
+}
+
+.kanban-card-title {
+	font-size: 12px;
+	font-weight: 500;
+	color: var(--vscode-foreground);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	flex: 1;
+	min-width: 0;
+}
+
+.kanban-card-meta {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 4px;
+	min-width: 0;
+}
+
+.kanban-card-workspace {
+	font-size: 11px;
+	color: var(--vscode-descriptionForeground);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	flex: 1;
+	min-width: 0;
+}
+
+.kanban-card-meta-right {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	flex-shrink: 0;
+}
+
+.kanban-card-changes {
+	font-size: 10px;
+	padding: 1px 5px;
+	border-radius: 8px;
+	background: var(--vscode-badge-background);
+	color: var(--vscode-badge-foreground);
+	white-space: nowrap;
+}
+
+.kanban-card-time {
+	font-size: 10px;
+	color: var(--vscode-descriptionForeground);
+	white-space: nowrap;
+}
+
+.kanban-empty {
+	padding: 10px 8px;
+	text-align: center;
+	font-size: 11px;
+	color: var(--vscode-disabledForeground);
+	font-style: italic;
+}

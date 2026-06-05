@@ -16,8 +16,15 @@ import { KeybindingWeight } from '../../platform/keybinding/common/keybindingsRe
 import { registerIcon } from '../../platform/theme/common/iconRegistry.js';
 import { IsAuxiliaryWindowContext, IsWindowAlwaysOnTopContext, SideBarVisibleContext } from '../../workbench/common/contextkeys.js';
 import { IWorkbenchLayoutService, Parts } from '../../workbench/services/layout/browser/layoutService.js';
+import { IPaneCompositePartService } from '../../workbench/services/panecomposite/browser/panecomposite.js';
+import { ViewContainerLocation } from '../../workbench/common/views.js';
+import { IConfigurationService } from '../../platform/configuration/common/configuration.js';
 import { SessionsWelcomeVisibleContext } from '../common/contextkeys.js';
 import { mainWindow } from '../../base/browser/window.js';
+
+const SESSIONS_SIDEBAR_CONTAINER_ID = 'agentic.workbench.view.sessionsContainer';
+const FILES_SIDEBAR_CONTAINER_ID = 'workbench.sessions.auxiliaryBar.filesContainer';
+const KANBAN_AUXBAR_CONTAINER_ID = 'workbench.sessions.kanbanContainer';
 
 // Register Icons
 const panelCloseIcon = registerIcon('agent-panel-close', Codicon.close, localize('agentPanelCloseIcon', "Icon to close the panel."));
@@ -171,13 +178,30 @@ class SwitchToEditorAction extends Action2 {
 		});
 	}
 
-	run(accessor: ServicesAccessor): void {
+	async run(accessor: ServicesAccessor): Promise<void> {
 		const layoutService = accessor.get(IWorkbenchLayoutService);
+		const paneCompositeService = accessor.get(IPaneCompositePartService);
+		const configurationService = accessor.get(IConfigurationService);
 		const editorVisible = layoutService.isVisible(Parts.EDITOR_PART, mainWindow);
-		// Toggle editor part — when showing editor also hide sessions part for full-screen editor feel,
-		// when hiding editor restore sessions part.
-		layoutService.setPartHidden(editorVisible, Parts.EDITOR_PART);
-		layoutService.setPartHidden(!editorVisible, Parts.SESSIONS_PART);
+
+		if (!editorVisible) {
+			// Switch to Editor mode: file explorer left, editor center, aux bar hidden
+			await configurationService.updateValue('workbench.editor.useModal', 'off');
+			paneCompositeService.openPaneComposite(FILES_SIDEBAR_CONTAINER_ID, ViewContainerLocation.Sidebar);
+			layoutService.setPartHidden(false, Parts.SIDEBAR_PART);
+			layoutService.setPartHidden(true, Parts.SESSIONS_PART);
+			layoutService.setPartHidden(false, Parts.EDITOR_PART);
+			layoutService.setPartHidden(true, Parts.AUXILIARYBAR_PART);
+		} else {
+			// Switch to Agent mode: sessions list left, claude chat center, kanban right
+			await configurationService.updateValue('workbench.editor.useModal', 'all');
+			paneCompositeService.openPaneComposite(SESSIONS_SIDEBAR_CONTAINER_ID, ViewContainerLocation.Sidebar);
+			paneCompositeService.openPaneComposite(KANBAN_AUXBAR_CONTAINER_ID, ViewContainerLocation.AuxiliaryBar);
+			layoutService.setPartHidden(false, Parts.SIDEBAR_PART);
+			layoutService.setPartHidden(false, Parts.SESSIONS_PART);
+			layoutService.setPartHidden(true, Parts.EDITOR_PART);
+			layoutService.setPartHidden(false, Parts.AUXILIARYBAR_PART);
+		}
 	}
 }
 

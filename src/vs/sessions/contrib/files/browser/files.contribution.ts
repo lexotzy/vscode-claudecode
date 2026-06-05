@@ -46,7 +46,7 @@ const filesViewContainer = viewContainerRegistry.registerViewContainer({
 		order: 0
 	},
 	windowEnablement: WindowEnablement.Sessions,
-}, ViewContainerLocation.AuxiliaryBar, { isDefault: true });
+}, ViewContainerLocation.Sidebar);
 
 class RegisterFilesViewContribution implements IWorkbenchContribution {
 
