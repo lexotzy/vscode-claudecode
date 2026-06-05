@@ -32,8 +32,8 @@ interface IKanbanColumn {
 
 function getColumns(): IKanbanColumn[] {
 	return [
-		{ cssClass: 'planning', label: localize('kanban.planning', 'Planning'), filter: s => s.status.get() === SessionStatus.InProgress && s.changes.get().length === 0 },
-		{ cssClass: 'in-progress', label: localize('kanban.inProgress', 'In Progress'), filter: s => s.status.get() === SessionStatus.InProgress && s.changes.get().length > 0 },
+		{ cssClass: 'planning', label: localize('kanban.planning', 'Planning'), filter: s => s.status.get() === SessionStatus.Untitled || (s.status.get() === SessionStatus.InProgress && !(s.changesSummary?.get()?.files)) },
+		{ cssClass: 'in-progress', label: localize('kanban.inProgress', 'In Progress'), filter: s => s.status.get() === SessionStatus.InProgress && !!(s.changesSummary?.get()?.files) },
 		{ cssClass: 'for-review', label: localize('kanban.forReview', 'For Review'), filter: s => s.status.get() === SessionStatus.NeedsInput },
 		{ cssClass: 'done', label: localize('kanban.done', 'Done'), filter: s => s.status.get() === SessionStatus.Completed || s.status.get() === SessionStatus.Error },
 	];

@@ -3,7 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { spawn, execSync, execFile } from 'child_process';
+import { spawn, execFile } from 'child_process';
 import { existsSync } from 'fs';
 import type { IncomingMessage, ServerResponse, Server } from 'http';
 import { createInterface } from 'readline';
@@ -105,11 +105,11 @@ export class ClaudeCliMainService extends Disposable implements IClaudeCliServic
 	// -- Public API --
 
 	async checkIsAvailable(): Promise<boolean> {
-		return !!this._resolveClaudePath();
+		return !!(await this._resolveClaudePath());
 	}
 
 	async startSession(sessionId: string, workspacePath: string, prompt: string, resumeCliSessionId?: string, modelId?: string): Promise<void> {
-		const claudePath = this._resolveClaudePath();
+		const claudePath = await this._resolveClaudePath();
 		if (!claudePath) {
 			throw new Error('Claude Code CLI not found. Install from https://claude.ai/code');
 		}
@@ -155,7 +155,7 @@ export class ClaudeCliMainService extends Disposable implements IClaudeCliServic
 	}
 
 	async checkAuthStatus(): Promise<'authenticated' | 'unauthenticated'> {
-		const claudePath = this._resolveClaudePath();
+		const claudePath = await this._resolveClaudePath();
 		if (!claudePath) {
 			return 'unauthenticated';
 		}
@@ -168,12 +168,12 @@ export class ClaudeCliMainService extends Disposable implements IClaudeCliServic
 
 	// -- Private helpers --
 
-	private _resolveClaudePath(): string | undefined {
+	private async _resolveClaudePath(): Promise<string | undefined> {
 		const configured = this._configurationService.getValue<string>('claudeCode.path');
 		if (configured?.trim() && existsSync(configured.trim())) {
 			return configured.trim();
 		}
-		return this._findClaudePathInline() ?? this._findViaPathEnv();
+		return this._findClaudePathInline() ?? await this._findViaPathEnvAsync();
 	}
 
 	private _findClaudePathInline(): string | undefined {
@@ -205,16 +205,12 @@ export class ClaudeCliMainService extends Disposable implements IClaudeCliServic
 		return undefined;
 	}
 
-	private _findViaPathEnv(): string | undefined {
-		try {
-			const result = execSync(`${CLAUDE_BINARY_NAME} --version`, { encoding: 'utf8', timeout: 3000 });
-			if (result?.trim().length > 0) {
-				return CLAUDE_BINARY_NAME;
-			}
-		} catch {
-			// Not in PATH
-		}
-		return undefined;
+	private _findViaPathEnvAsync(): Promise<string | undefined> {
+		return new Promise(resolve => {
+			execFile(CLAUDE_BINARY_NAME, ['--version'], { timeout: 3000 }, (err, stdout) => {
+				resolve(!err && stdout?.trim().length ? CLAUDE_BINARY_NAME : undefined);
+			});
+		});
 	}
 
 	private async _startPermissionServer(sessionId: string): Promise<number> {
@@ -243,7 +239,14 @@ export class ClaudeCliMainService extends Disposable implements IClaudeCliServic
 			return;
 		}
 		let body = '';
-		req.on('data', (chunk: Buffer | string) => { body += chunk; });
+		req.on('data', (chunk: Buffer | string) => {
+			body += chunk;
+			if (body.length > 1024 * 1024) {
+				res.statusCode = 413;
+				res.end();
+				req.destroy();
+			}
+		});
 		req.on('end', () => {
 			let parsed: { id: string; tool_name: string; tool_input?: Record<string, unknown>; description?: string };
 			try {
@@ -366,10 +369,11 @@ export class ClaudeCliMainService extends Disposable implements IClaudeCliServic
 			}
 		}
 		const session = this._sessions.get(sessionId);
-		if (session) {
-			session.httpServer?.close();
-			this._sessions.delete(sessionId);
+		if (!session) {
+			return; // already cleaned up — do not double-fire
 		}
+		session.httpServer?.close();
+		this._sessions.delete(sessionId);
 		this._onDidSessionEnd.fire({ sessionId, code });
 	}
 

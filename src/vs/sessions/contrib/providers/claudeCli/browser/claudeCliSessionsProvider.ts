@@ -7,7 +7,7 @@ import { Emitter, Event } from '../../../../../base/common/event.js';
 import { Codicon } from '../../../../../base/common/codicons.js';
 import { Disposable, DisposableMap, DisposableStore } from '../../../../../base/common/lifecycle.js';
 import { Schemas } from '../../../../../base/common/network.js';
-import { ISettableObservable, constObservable, observableValue } from '../../../../../base/common/observable.js';
+import { ISettableObservable, constObservable, derived, observableValue } from '../../../../../base/common/observable.js';
 import { basename, dirname } from '../../../../../base/common/resources.js';
 import { ThemeIcon } from '../../../../../base/common/themables.js';
 import { URI } from '../../../../../base/common/uri.js';
@@ -22,7 +22,7 @@ import { IClaudeCliService, IClaudeCliPermissionPayload } from '../../../../../p
 import { ClaudeCliStreamEvent, isAssistantEvent, isResultEvent, isSystemInitEvent, isTextBlock, isThinkingBlock, isToolUseBlock } from '../../../../../platform/claudeCli/common/streamJson.js';
 import {
 	IChat, IChatCheckpoints, ISession, ISessionCapabilities, ISessionChangeset,
-	ISessionFolder, ISessionType, ISessionWorkspace, SessionStatus,
+	ISessionChangesSummary, ISessionFolder, ISessionType, ISessionWorkspace, SessionStatus,
 	SESSION_WORKSPACE_GROUP_LOCAL, toSessionId,
 } from '../../../../services/sessions/common/session.js';
 import { ISendRequestOptions, ISessionChangeEvent, ISessionModelPickerOptions, ISessionsProvider } from '../../../../services/sessions/common/sessionsProvider.js';
@@ -199,6 +199,7 @@ export class ClaudeCliSessionsProvider extends Disposable implements ISessionsPr
 	private readonly _newSessions = new DisposableMap<string, ClaudeCliChatModel>();
 	private readonly _sessions = new Map<string, ClaudeCliChatModel>();
 	private readonly _sendListeners = this._register(new DisposableMap<string, DisposableStore>());
+	private readonly _sessionGeneration = new Map<string, number>();
 	private _outputChannelRegistered = false;
 
 	constructor(
@@ -261,7 +262,7 @@ export class ClaudeCliSessionsProvider extends Disposable implements ISessionsPr
 		if (!workspace) {
 			throw new Error(`[ClaudeCliProvider] Cannot resolve workspace for: ${workspaceUri.toString()}`);
 		}
-		const model = this._register(new ClaudeCliChatModel(workspaceUri, this._gitService));
+		const model = new ClaudeCliChatModel(workspaceUri, this._gitService);
 		model.setWorkspace(workspace);
 		this._newSessions.set(model.sessionId, model);
 		return this._toISession(model);
@@ -319,6 +320,7 @@ export class ClaudeCliSessionsProvider extends Disposable implements ISessionsPr
 		this._sessions.delete(model.sessionId);
 		this._newSessions.deleteAndDispose(model.sessionId);
 		this._sendListeners.deleteAndDispose(model.sessionId);
+		this._sessionGeneration.delete(model.sessionId);
 		model.dispose();
 		this._onDidChangeSessions.fire({ added: [], removed: [iSession], changed: [] });
 	}
@@ -398,6 +400,10 @@ export class ClaudeCliSessionsProvider extends Disposable implements ISessionsPr
 			this._onDidChangeSessions.fire({ added: [], removed: [], changed: [iSession] });
 		}
 
+		// Bump generation so stale events from the dying process are ignored.
+		const generation = (this._sessionGeneration.get(sessionId) ?? 0) + 1;
+		this._sessionGeneration.set(sessionId, generation);
+
 		// Wire listeners BEFORE starting the session so no early events are missed.
 		const listeners = new DisposableStore();
 		this._sendListeners.set(sessionId, listeners);
@@ -409,7 +415,7 @@ export class ClaudeCliSessionsProvider extends Disposable implements ISessionsPr
 		}
 
 		listeners.add(
-			Event.filter(this._claudeCliService.onDidSessionData, e => e.sessionId === sessionId)(payload => {
+			Event.filter(this._claudeCliService.onDidSessionData, e => e.sessionId === sessionId && this._sessionGeneration.get(sessionId) === generation)(payload => {
 				let event: ClaudeCliStreamEvent;
 				try {
 					event = JSON.parse(payload.line) as ClaudeCliStreamEvent;
@@ -424,13 +430,13 @@ export class ClaudeCliSessionsProvider extends Disposable implements ISessionsPr
 		);
 
 		listeners.add(
-			Event.filter(this._claudeCliService.onDidPermissionRequest, e => e.sessionId === sessionId)(req => {
+			Event.filter(this._claudeCliService.onDidPermissionRequest, e => e.sessionId === sessionId && this._sessionGeneration.get(sessionId) === generation)(req => {
 				this._handlePermissionRequest(req);
 			})
 		);
 
 		listeners.add(
-			Event.filter(this._claudeCliService.onDidSessionEnd, e => e.sessionId === sessionId)(payload => {
+			Event.filter(this._claudeCliService.onDidSessionEnd, e => e.sessionId === sessionId && this._sessionGeneration.get(sessionId) === generation)(payload => {
 				const now = new Date();
 				const code = payload.code;
 				if (model.status.get() === SessionStatus.InProgress) {
@@ -459,6 +465,7 @@ export class ClaudeCliSessionsProvider extends Disposable implements ISessionsPr
 
 	private _handleStreamEvent(model: ClaudeCliChatModel, event: ClaudeCliStreamEvent, iSession: ISession): void {
 		if (isSystemInitEvent(event)) {
+			model.lastCliSessionId = event.session_id;
 			model.setDescription(localize('claudeCli.initialized', 'Claude Code initialized'));
 			this._onDidChangeSessions.fire({ added: [], removed: [], changed: [iSession] });
 			return;
@@ -569,6 +576,10 @@ export class ClaudeCliSessionsProvider extends Disposable implements ISessionsPr
 		const singleChatObs = model.mainChat;
 		const chatsObs = singleChatObs.map(chat => [chat] as readonly IChat[]);
 		const changesets = constObservable<readonly ISessionChangeset[]>([model.changeset]);
+		const changesSummary = derived(reader => {
+			const files = model.changeset.changes.read(reader).length;
+			return files > 0 ? { files, additions: 0, deletions: 0 } satisfies ISessionChangesSummary : undefined;
+		});
 
 		return {
 			sessionId: model.sessionId,
@@ -582,6 +593,7 @@ export class ClaudeCliSessionsProvider extends Disposable implements ISessionsPr
 			updatedAt: model.updatedAt,
 			status: model.status,
 			changes: constObservable([]),
+			changesSummary,
 			changesets,
 			modelId: constObservable(undefined),
 			mode: constObservable(undefined),
@@ -603,6 +615,7 @@ export class ClaudeCliSessionsProvider extends Disposable implements ISessionsPr
 			model.dispose();
 		}
 		this._sessions.clear();
+		this._sessionGeneration.clear();
 		super.dispose();
 	}
 }
