@@ -3,6 +3,26 @@
 [![Bugs](https://img.shields.io/github/issues/microsoft/vscode/bug.svg)](https://github.com/microsoft/vscode/issues?utf8=✓&q=is%3Aissue+is%3Aopen+label%3Abug)
 [![Gitter](https://img.shields.io/badge/chat-on%20gitter-yellow.svg)](https://gitter.im/Microsoft/vscode)
 
+## Running from Source
+
+**Prerequisites:** Node.js v24+
+
+```bash
+# 1. Install dependencies
+npm install
+
+# 2. Compile TypeScript (one-shot)
+npm run compile
+
+# 3a. Launch Electron app
+./scripts/code.sh
+
+# 3b. Or launch sessions web server
+./scripts/code-sessions-web.sh
+```
+
+For incremental compilation during development, use the `VS Code - Build` watch task in the IDE instead of `npm run compile`.
+
 ## The Repository
 
 This repository ("`Code - OSS`") is where we (Microsoft) develop the [Visual Studio Code](https://code.visualstudio.com) product together with the community. Not only do we work on code and issues here, but we also publish our [roadmap](https://github.com/microsoft/vscode/wiki/Roadmap), [monthly iteration plans](https://github.com/microsoft/vscode/wiki/Iteration-Plans), and our [endgame plans](https://github.com/microsoft/vscode/wiki/Running-the-Endgame). This source code is available to everyone under the standard [MIT license](https://github.com/microsoft/vscode/blob/main/LICENSE.txt).

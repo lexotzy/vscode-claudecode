@@ -27,15 +27,15 @@ export const KANBAN_VIEW_ID = 'workbench.sessions.kanbanView';
 interface IKanbanColumn {
 	readonly cssClass: string;
 	readonly label: string;
-	readonly statuses: SessionStatus[];
+	readonly filter: (session: ISession) => boolean;
 }
 
 function getColumns(): IKanbanColumn[] {
 	return [
-		{ cssClass: 'planning', label: localize('kanban.planning', 'Planning'), statuses: [SessionStatus.Untitled] },
-		{ cssClass: 'in-progress', label: localize('kanban.inProgress', 'In Progress'), statuses: [SessionStatus.InProgress] },
-		{ cssClass: 'for-review', label: localize('kanban.forReview', 'For Review'), statuses: [SessionStatus.NeedsInput] },
-		{ cssClass: 'done', label: localize('kanban.done', 'Done'), statuses: [SessionStatus.Completed, SessionStatus.Error] },
+		{ cssClass: 'planning', label: localize('kanban.planning', 'Planning'), filter: s => s.status.get() === SessionStatus.InProgress && s.changes.get().length === 0 },
+		{ cssClass: 'in-progress', label: localize('kanban.inProgress', 'In Progress'), filter: s => s.status.get() === SessionStatus.InProgress && s.changes.get().length > 0 },
+		{ cssClass: 'for-review', label: localize('kanban.forReview', 'For Review'), filter: s => s.status.get() === SessionStatus.NeedsInput },
+		{ cssClass: 'done', label: localize('kanban.done', 'Done'), filter: s => s.status.get() === SessionStatus.Completed || s.status.get() === SessionStatus.Error },
 	];
 }
 
@@ -103,7 +103,7 @@ export class KanbanViewPane extends ViewPane {
 				const body = columnBodies.get(col.cssClass)!;
 				const countEl = columnCounts.get(col.cssClass)!;
 
-				const matching = sessions.filter(s => col.statuses.includes(s.status.get()));
+				const matching = sessions.filter(s => col.filter(s));
 				dom.clearNode(body);
 				countEl.textContent = String(matching.length);
 
